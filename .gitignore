@@ -7,7 +7,7 @@ venv/
 .pytest_cache/
 
 # Data & model artifacts (live on Google Drive, NOT in git)
-data/
+/data/
 checkpoints/
 *.pt
 *.pth

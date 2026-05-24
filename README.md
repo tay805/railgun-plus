@@ -89,6 +89,43 @@ git remote add origin https://github.com/YOUR_USERNAME/railgun-plus.git
 git push -u origin main
 ```
 
+## Evaluation (Notebook 2)
+
+`notebooks/02_evaluate.ipynb` runs the full comparison via
+`railgun_plus.eval.harness` and produces paper-style outputs.
+
+**Methods compared (all runnable in Colab):**
+- `expert` — PIBT run to completion (oracle / upper reference).
+- `pibt_only` — pure PIBT at inference, network ignored (shows what the net adds).
+- `greedy` — trained net + naive conflict resolution = baseline RAILGUN (deadlocks).
+- `corrected` — trained net + PIBT corrector = **the contribution**.
+
+**Metrics:** CSR, normalized SoC (`SoC / lower-bound`, where 1.0 = optimal and
+the lower bound is the sum of per-agent shortest paths), and makespan (paper
+Table I). SoC/makespan are averaged over *solved* instances only and reported
+next to `n_solved` so the "solved nothing -> SoC looks like 0" artifact is
+visible, not misleading.
+
+**Outputs** (saved to Drive `results/`): `results_table.csv` plus
+`csr_all_methods.png`, `soc_ratio_all_methods.png`, `makespan_all_methods.png`.
+
+### Comparing against SCRIMP / DCC / MAPF-GPT (later)
+
+Those are separate trained systems; reproducing them in Colab is its own
+multi-week effort, so they are deliberately NOT run here. The honest path is to
+wrap this model as a POGEMA agent and run it through `pogema-toolbox`'s official
+benchmark, which already tabulates those baselines on the same six POGEMA
+metrics as the RAILGUN paper. `railgun_plus.eval.harness.pogema_benchmark_stub`
+documents the intended approach. Do this once the scaled-up Route-C model is
+solid.
+
+## Scaling up for real results
+
+The first end-to-end run uses ~50 instances (a plumbing test). For numbers you
+can trust, generate more data across agent counts and train longer (in
+Notebook 1's multi-agent-count block, ~300 instances each across
+{16,32,64,96} agents, then train 30-50 epochs).
+
 ## Data routes
 
 - **Route C (PIBT) — implemented, default.** `generate_with_pogema()` solves

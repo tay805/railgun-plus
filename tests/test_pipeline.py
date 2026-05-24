@@ -66,3 +66,37 @@ def test_no_collisions_in_pibt_output():
     for t in range(T):
         occupied = [inst.paths[i][t] for i in range(inst.num_agents)]
         assert len(set(occupied)) == len(occupied), f"vertex collision at t={t}"
+
+
+def test_metrics_lower_bound_and_ratio():
+    """SoC ratio should be >= 1.0 and equal to soc/lower_bound on solved."""
+    from railgun_plus.eval.metrics import (evaluate_instance, soc_lower_bound,
+                                           summarize)
+    grid = np.zeros((5, 7), dtype=np.int8)
+    inst = solve_instance(grid, [(0, 0), (4, 6)], [(4, 6), (0, 0)],
+                          max_steps=128, seed=11)
+    assert inst is not None
+    m = evaluate_instance(inst.paths, inst)
+    assert m["success"]
+    assert m["soc_lb"] > 0
+    assert m["soc_ratio"] >= 1.0 - 1e-9   # can't beat the lower bound
+    s = summarize([m])
+    assert s["csr"] == 1.0
+    assert s["n_solved"] == 1
+
+
+def test_harness_expert_runs_without_model():
+    """expert / pibt_only methods must run with model=None (no torch needed)."""
+    from railgun_plus.eval.harness import run_method
+    from railgun_plus.eval.metrics import summarize
+    grid = np.zeros((5, 7), dtype=np.int8)
+    insts = []
+    for seed in range(3):
+        inst = solve_instance(grid, [(0, 0), (4, 6)], [(4, 6), (0, 0)],
+                              max_steps=128, seed=seed)
+        if inst:
+            insts.append(inst)
+    res = run_method("expert", None, insts)
+    s = summarize(res)
+    assert s["n"] == len(insts)
+    assert 0.0 <= s["csr"] <= 1.0

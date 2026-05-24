@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Data & model artifacts (live on Google Drive, NOT in git)
+data/
+checkpoints/
+*.pt
+*.pth
+*.npz
+*.arrow
+
+# Notebooks: keep the .ipynb but strip heavy outputs before committing
+.ipynb_checkpoints/
+
+# OS
+.DS_Store

@@ -123,8 +123,20 @@ solid.
 
 The first end-to-end run uses ~50 instances (a plumbing test). For numbers you
 can trust, generate more data across agent counts and train longer (in
-Notebook 1's multi-agent-count block, ~300 instances each across
+Notebook 1's multi-agent-count block, ~200 instances each across
 {16,32,64,96} agents, then train 30-50 epochs).
+
+### Resumable data generation
+
+`scripts/generate_data.py` is resumable. It writes each shard to disk as soon
+as it fills (never only in RAM) and keeps a `progress_<config>.json` manifest
+in the output dir. If Colab disconnects, **re-run the exact same command** — it
+reads the manifest and generates only the remaining instances. Each
+(map_size, density, agents, seed) config has its own manifest, so the
+multi-agent-count loop resumes per agent count: completed counts are skipped
+instantly, the interrupted one continues, the rest proceed. `--batch` controls
+checkpoint frequency (smaller = less lost work on disconnect). To regenerate
+from scratch, delete that config's `progress_*.json` and its shards.
 
 ## Data routes
 

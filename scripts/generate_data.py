@@ -1,15 +1,28 @@
-"""Generate PIBT expert data and save as .npz shards.
+"""Generate PIBT expert data and save as .npz shards — RESUMABLE.
 
 Usage (locally or in Colab):
     python scripts/generate_data.py --out data/shards --instances 200 \
         --map-size 32 --density 0.2 --agents 32 --seed 0
 
-On Colab, point --out at a Google Drive path so data survives session resets,
-e.g. --out /content/drive/MyDrive/railgun-plus/data/shards
+On Colab, point --out at a Google Drive path so data + progress survive
+session resets, e.g.
+    --out /content/drive/MyDrive/railgun-plus/data/shards
+
+RESUMABILITY
+------------
+If Colab disconnects mid-run, just re-run the SAME command. The script:
+  1. Writes each shard to disk AS SOON as it fills (not at the end), so
+     completed shards are never lost.
+  2. Keeps a manifest (`progress_<config>.json`) recording how many instances
+     have already been generated for this exact config. On restart it reads the
+     manifest and only generates the REMAINING instances.
+A "config" is identified by (map_size, density, agents, seed), so different
+agent counts / seeds have independent progress and never collide.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import numpy as np
 
@@ -17,9 +30,29 @@ from railgun_plus.data.generate import generate_with_pogema
 from railgun_plus.data.features import instance_to_samples, normalize_features
 
 
+def config_tag(args) -> str:
+    """Stable identifier for this generation config (used in filenames)."""
+    return (f"m{args.map_size}_d{int(args.density*100)}"
+            f"_a{args.agents}_s{args.seed}")
+
+
+def load_manifest(path):
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return {"instances_done": 0, "shards_done": 0, "samples_done": 0}
+
+
+def save_manifest(path, manifest):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(manifest, f)
+    os.replace(tmp, path)  # atomic; survives a crash mid-write
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", required=True, help="output directory for shards")
+    ap.add_argument("--out", required=True)
     ap.add_argument("--instances", type=int, default=200)
     ap.add_argument("--map-size", type=int, default=32)
     ap.add_argument("--density", type=float, default=0.2)
@@ -27,44 +60,88 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--shard-size", type=int, default=2000,
                     help="samples per .npz shard")
+    ap.add_argument("--batch", type=int, default=10,
+                    help="instances to generate per chunk before saving "
+                         "progress (smaller = more frequent checkpoints)")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    print(f"Generating {args.instances} instances "
-          f"({args.map_size}x{args.map_size}, density={args.density}, "
-          f"{args.agents} agents)...")
-    instances = generate_with_pogema(
-        num_instances=args.instances, map_size=args.map_size,
-        obstacle_density=args.density, num_agents=args.agents, seed=args.seed)
-    print(f"  solved {len(instances)} instances")
+    tag = config_tag(args)
+    manifest_path = os.path.join(args.out, f"progress_{tag}.json")
+    manifest = load_manifest(manifest_path)
 
+    done = manifest["instances_done"]
+    if done >= args.instances:
+        print(f"[{tag}] already complete: {done}/{args.instances} instances. "
+              f"Nothing to do.")
+        return
+    if done > 0:
+        print(f"[{tag}] RESUMING: {done}/{args.instances} instances already "
+              f"generated. Continuing from there.")
+    else:
+        print(f"[{tag}] starting fresh: target {args.instances} instances "
+              f"({args.map_size}x{args.map_size}, density={args.density}, "
+              f"{args.agents} agents)")
+
+    shard_idx = manifest["shards_done"]
+    total_samples = manifest["samples_done"]
     buf_in, buf_out, buf_mask = [], [], []
-    shard_idx = 0
 
     def flush():
         nonlocal shard_idx, buf_in, buf_out, buf_mask
         if not buf_in:
             return
-        path = os.path.join(args.out, f"shard_{args.seed:04d}_{shard_idx:04d}.npz")
-        np.savez_compressed(path,
-                            F_in=np.stack(buf_in),
-                            F_out=np.stack(buf_out),
-                            mask=np.stack(buf_mask))
-        print(f"  wrote {path} ({len(buf_in)} samples)")
+        # filename includes config tag so different configs never overwrite
+        path = os.path.join(args.out, f"shard_{tag}_{shard_idx:04d}.npz")
+        np.savez_compressed(path, F_in=np.stack(buf_in),
+                            F_out=np.stack(buf_out), mask=np.stack(buf_mask))
+        print(f"  wrote {os.path.basename(path)} ({len(buf_in)} samples)")
         shard_idx += 1
         buf_in, buf_out, buf_mask = [], [], []
 
-    total = 0
-    for inst in instances:
-        for F_in, F_out, mask in instance_to_samples(inst):
-            buf_in.append(normalize_features(F_in))
-            buf_out.append(F_out)
-            buf_mask.append(mask)
-            total += 1
-            if len(buf_in) >= args.shard_size:
-                flush()
+    # Generate in batches; checkpoint the manifest after each batch so a
+    # disconnect loses at most one batch of work.
+    remaining = args.instances - done
+    generated_this_run = 0
+    while remaining > 0:
+        n = min(args.batch, remaining)
+        # IMPORTANT: vary the seed by how many we've already done, so resumed
+        # runs produce NEW instances rather than repeating the first ones.
+        chunk_seed = args.seed * 100000 + done + generated_this_run
+        insts = generate_with_pogema(
+            num_instances=n, map_size=args.map_size,
+            obstacle_density=args.density, num_agents=args.agents,
+            seed=chunk_seed)
+
+        for inst in insts:
+            for F_in, F_out, mask in instance_to_samples(inst):
+                buf_in.append(normalize_features(F_in))
+                buf_out.append(F_out)
+                buf_mask.append(mask)
+                total_samples += 1
+                if len(buf_in) >= args.shard_size:
+                    flush()
+
+        generated_this_run += len(insts)
+        remaining -= n  # advance by requested n (some may fail to solve)
+
+        # checkpoint progress
+        manifest = {"instances_done": done + generated_this_run,
+                    "shards_done": shard_idx,
+                    "samples_done": total_samples}
+        # flush partial buffer to a shard too, so nothing is only in RAM
+        flush()
+        manifest["shards_done"] = shard_idx
+        save_manifest(manifest_path, manifest)
+        print(f"  progress: {manifest['instances_done']}/{args.instances} "
+              f"instances, {total_samples} samples (checkpointed)")
+
     flush()
-    print(f"Done. {total} samples across {shard_idx} shards in {args.out}")
+    save_manifest(manifest_path, {"instances_done": args.instances,
+                                  "shards_done": shard_idx,
+                                  "samples_done": total_samples})
+    print(f"[{tag}] DONE. {total_samples} samples across {shard_idx} shards "
+          f"in {args.out}")
 
 
 if __name__ == "__main__":

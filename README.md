@@ -5,6 +5,32 @@ RAILGUN-style U-Net) composed with a **PIBT corrector** at inference to
 eliminate the deadlock/congestion collapse that pure greedy rollouts suffer at
 high agent density.
 
+## Novelty (the one-sentence claim)
+
+> RAILGUN+ is the first to show that a centralized, map-based CNN policy —
+> which alone collapses into deadlock at high agent density — becomes a
+> competitive MAPF solver when its per-cell action distribution is used as the
+> priority ordering for a PIBT corrector, distilling an expensive search-based
+> expert (LaCAM) into a fast, deadlock-free reactive policy.
+
+Three concrete contributions over the RAILGUN paper:
+1. **Deadlock fix.** RAILGUN named congestion/deadlock as its key unsolved
+   weakness. Feeding the network's softmax into PIBT as its preference ordering
+   is a specific, novel mechanism that resolves it (greedy CSR collapses to ~0
+   at high density; corrected stays high).
+2. **Pure-PIBT ablation = honest rigor.** We compare against PIBT-with-no-network,
+   answering the question most learned-MAPF papers dodge: *does the network
+   actually beat the trivial reactive baseline?* A LaCAM teacher (not PIBT) is
+   what makes "yes" achievable — distilling a near-optimal expert the corrector
+   can't reach on its own.
+3. **Distillation framing.** A fast CNN that distills slow near-optimal search,
+   made deadlock-free by PIBT, inheriting RAILGUN's map-size-independent
+   scalability.
+
+**Why upDdate to LaCAM and not keep PIBT as the teacher:** PIBT is free at inference (it's the
+corrector), so imitating it can't beat it. LaCAM is near-SoC-optimal but too
+slow to run per-step, so distilling it adds real value.
+
 **Contribution.** The same trained U-Net is run two ways — a greedy rollout
 (baseline RAILGUN behaviour) and a PIBT-corrected rollout (ours). PIBT turns
 the network's per-cell action probabilities into a guaranteed collision-free
@@ -140,14 +166,25 @@ from scratch, delete that config's `progress_*.json` and its shards.
 
 ## Data routes
 
-- **Route C (PIBT) — implemented, default.** `generate_with_pogema()` solves
-  POGEMA maps with PIBT. Zero compilation, runs anywhere. PIBT is also the
-  corrector, so the same code is reused. Lower expert SoC, but the cleanest
-  ablation: a weak expert + corrector still fixes deadlocks.
-- **Route A (LaCAM) — stub, later.** `load_lacam_instances()` in
-  `data/generate.py` is a stub. Implement it to load LaCAM-quality data into
-  the same `Instance` format; everything downstream is unchanged. Use this to
-  chase lower SoC after Route C results are in hand.
+- **Route A (LaCAM) — the expert for real results.** Compile LaCAM once on
+  Kaggle (`scripts/build_lacam.sh`), save the binary as a Kaggle dataset, then
+  generate with `--expert lacam --lacam-bin <path>`. Near-SoC-optimal teacher;
+  the network distilling it can beat pure PIBT. See
+  `notebooks/00_generate_lacam.ipynb`. The only fragile spot is
+  `parse_lacam_solution` in `data/lacam_expert.py` — if your LaCAM fork's output
+  format differs, that one function is the fix (docstring explains).
+- **Route C (PIBT) — pure Python, no compilation.** `generate_with_pogema`
+  solves with PIBT. Good for the deadlock ablation, but the net can't beat PIBT
+  when PIBT is also the teacher. Use `--expert pibt` (default).
+
+### Kaggle workflow (three notebooks)
+
+1. `00_generate_lacam.ipynb` — build/attach LaCAM, generate data, save as a
+   dataset.
+2. `01_setup_generate_train.ipynb` — train the U-Net on that data (resumable,
+   early stopping, saves `best.pt`).
+3. `02_evaluate.ipynb` — four-method comparison (expert / pibt_only / greedy /
+   corrected) with CSR, deadlock-rate, SoC-ratio, makespan tables + plots.
 
 ## Swapping the backbone
 

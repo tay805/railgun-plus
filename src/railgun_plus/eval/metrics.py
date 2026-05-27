@@ -87,8 +87,13 @@ def summarize(results: list[dict]) -> dict:
     avg_mk = sum(r["makespan"] for r in solved) / len(solved) if solved else 0.0
     ratios = [r["soc_ratio"] for r in solved if r["soc_ratio"] is not None]
     avg_ratio = sum(ratios) / len(ratios) if ratios else 0.0
+    # deadlock rate = fraction of instances NOT solved (agents stuck / livelocked).
+    # This is the headline efficiency metric: greedy deadlocks often, the
+    # corrector should deadlock rarely.
+    deadlock_rate = 1.0 - csr
     return {
         "csr": csr,
+        "deadlock_rate": deadlock_rate,
         "n": n,
         "n_solved": len(solved),
         "avg_soc_solved": avg_soc,

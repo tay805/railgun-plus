@@ -74,13 +74,12 @@ def generate_with_pogema(num_instances: int,
     return instances
 
 
-# ---- Route A seam (LaCAM) -------------------------------------------------
-def load_lacam_instances(path: str) -> list[Instance]:
-    """STUB for Route A. Implement this later to load LaCAM-solved instances
-    (e.g. converted from the MAPF-GPT Hugging Face dataset, or generated via
-    the MAPF-GPT generate_dataset.py pipeline) into the SAME Instance format.
-    Once implemented, training/eval code needs zero changes.
-    """
-    raise NotImplementedError(
-        "Route A not implemented yet. Start with Route C (generate_with_pogema). "
-        "When ready, convert LaCAM data into Instance objects here.")
+# ---- Route A (LaCAM) ------------------------------------------------------
+# Implemented in lacam_expert.py. Re-exported here for convenience so callers
+# can do `from railgun_plus.data.generate import generate_with_lacam`.
+def generate_with_lacam(*args, **kwargs):
+    """Generate solved instances using POGEMA maps + the LaCAM C++ expert.
+    See data/lacam_expert.generate_with_lacam for the full signature
+    (requires lacam_bin=path-to-compiled-binary)."""
+    from .lacam_expert import generate_with_lacam as _g
+    return _g(*args, **kwargs)

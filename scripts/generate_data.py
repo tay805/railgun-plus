@@ -31,8 +31,9 @@ from railgun_plus.data.features import instance_to_samples, normalize_features
 
 
 def config_tag(args) -> str:
-    """Stable identifier for this generation config (used in filenames)."""
-    return (f"m{args.map_size}_d{int(args.density*100)}"
+    """Stable identifier for this generation config (used in filenames).
+    Includes expert so pibt/lacam data never collide."""
+    return (f"{args.expert}_m{args.map_size}_d{int(args.density*100)}"
             f"_a{args.agents}_s{args.seed}")
 
 
@@ -63,7 +64,17 @@ def main():
     ap.add_argument("--batch", type=int, default=10,
                     help="instances to generate per chunk before saving "
                          "progress (smaller = more frequent checkpoints)")
+    ap.add_argument("--expert", choices=["pibt", "lacam"], default="pibt",
+                    help="expert solver for trajectories")
+    ap.add_argument("--lacam-bin", default=None,
+                    help="path to compiled LaCAM binary (required if "
+                         "--expert lacam)")
+    ap.add_argument("--lacam-time-ms", type=int, default=10000,
+                    help="LaCAM anytime budget per instance in ms")
     args = ap.parse_args()
+
+    if args.expert == "lacam" and not args.lacam_bin:
+        ap.error("--expert lacam requires --lacam-bin <path-to-binary>")
 
     os.makedirs(args.out, exist_ok=True)
     tag = config_tag(args)
@@ -108,10 +119,18 @@ def main():
         # IMPORTANT: vary the seed by how many we've already done, so resumed
         # runs produce NEW instances rather than repeating the first ones.
         chunk_seed = args.seed * 100000 + done + generated_this_run
-        insts = generate_with_pogema(
-            num_instances=n, map_size=args.map_size,
-            obstacle_density=args.density, num_agents=args.agents,
-            seed=chunk_seed)
+        if args.expert == "lacam":
+            from railgun_plus.data.lacam_expert import generate_with_lacam
+            insts = generate_with_lacam(
+                num_instances=n, lacam_bin=args.lacam_bin,
+                map_size=args.map_size, obstacle_density=args.density,
+                num_agents=args.agents, seed=chunk_seed,
+                time_limit_ms=args.lacam_time_ms)
+        else:
+            insts = generate_with_pogema(
+                num_instances=n, map_size=args.map_size,
+                obstacle_density=args.density, num_agents=args.agents,
+                seed=chunk_seed)
 
         for inst in insts:
             for F_in, F_out, mask in instance_to_samples(inst):

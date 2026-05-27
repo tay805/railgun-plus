@@ -96,6 +96,7 @@ def sweep_to_table(sweep: dict, out_csv: str = None):
             s = sweep[m][k]
             rows.append({
                 "method": m, "agents": k, "csr": round(s["csr"], 3),
+                "deadlock_rate": round(s["deadlock_rate"], 3),
                 "avg_soc_ratio": round(s["avg_soc_ratio_solved"], 3),
                 "avg_makespan": round(s["avg_makespan_solved"], 1),
                 "n_solved": s["n_solved"], "n": s["n"],
@@ -128,11 +129,12 @@ def plot_sweep(sweep: dict, metric="csr", title=None, savepath=None):
         plt.plot(ks, ys, fmt, label=label)
     plt.xlabel("Number of agents")
     ylabels = {"csr": "CSR (success rate)",
+               "deadlock_rate": "Deadlock rate (1 - CSR; lower=better)",
                "avg_soc_ratio_solved": "SoC / lower-bound (solved; 1.0=optimal)",
                "avg_makespan_solved": "Avg makespan (solved)"}
     plt.ylabel(ylabels.get(metric, metric))
     plt.title(title or f"{metric} vs agents")
-    if metric == "csr":
+    if metric in ("csr", "deadlock_rate"):
         plt.ylim(0, 1.05)
     plt.legend(); plt.grid(True)
     if savepath:

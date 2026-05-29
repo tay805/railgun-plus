@@ -68,7 +68,16 @@ def _pibt_only_paths(inst):
 
 
 def run_method(method: str, model, instances, device="cpu", lacam_bin=None):
-    """Run one method over a list of instances; return list of metric dicts."""
+    """Run one method over a list of instances; return list of metric dicts.
+
+    method can be:
+      "expert"     - LaCAM if lacam_bin given else PIBT
+      "pibt_only"  - pure PIBT, no model
+      "greedy"     - net + naive conflict resolution
+      "corrected"  - net + PIBT (current default = v1_softmax_primary)
+      "variant:v2_softmax_tiebreak" / "variant:v3_conf_gated" / "variant:v4_prio_by_conf"
+                   - Step-1 corrector variants for comparison.
+    """
     results = []
     for inst in instances:
         if method == "expert":
@@ -81,6 +90,12 @@ def run_method(method: str, model, instances, device="cpu", lacam_bin=None):
         elif method == "corrected":
             from ..solvers.corrector import corrected_rollout
             _, paths = corrected_rollout(model, inst, device=device)
+        elif method.startswith("variant:"):
+            from ..solvers.variants import VARIANTS
+            name = method.split(":", 1)[1]
+            if name not in VARIANTS:
+                raise ValueError(f"unknown variant {name}; have {list(VARIANTS)}")
+            _, paths = VARIANTS[name](model, inst, device=device)
         else:
             raise ValueError(f"unknown method {method}")
         results.append(evaluate_instance(paths, inst))
@@ -139,10 +154,13 @@ def plot_sweep(sweep: dict, metric="csr", title=None, savepath=None):
     metric: "csr" | "avg_soc_ratio_solved" | "avg_makespan_solved"
     """
     import matplotlib.pyplot as plt
-    styles = {"expert": ("k:", "Expert (PIBT, oracle)"),
+    styles = {"expert": ("k:", "Expert (LaCAM oracle)"),
               "pibt_only": ("^-.", "Pure PIBT (no net)"),
               "greedy": ("o--", "Greedy (baseline RAILGUN)"),
-              "corrected": ("s-", "PIBT-corrected (ours)")}
+              "corrected": ("s-", "PIBT-corrected (v1)"),
+              "variant:v2_softmax_tiebreak": ("D-", "v2: softmax tie-break"),
+              "variant:v3_conf_gated": ("P-", "v3: confidence-gated"),
+              "variant:v4_prio_by_conf": ("X-", "v4: priority by conf")}
     plt.figure(figsize=(7, 5))
     for m, data in sweep.items():
         ks = sorted(data)

@@ -30,29 +30,49 @@ from ..data.grid_utils import bfs_distance_field
 # reference methods run in environments without torch.
 
 
-def _expert_paths(inst):
-    """Re-run the expert (PIBT) to completion on an instance."""
+_LACAM_BIN_ENV = "RAILGUN_LACAM_BIN"
+
+
+def _expert_paths(inst, lacam_bin=None):
+    """Run the EXPERT solver to completion on an instance.
+
+    If a LaCAM binary path is given (explicitly or via the RAILGUN_LACAM_BIN
+    environment variable), invoke LaCAM — the near-optimal expert. Otherwise
+    fall back to PIBT. This makes `expert` a meaningful upper-reference line
+    that is DISTINCT from `pibt_only` when LaCAM is available.
+    """
+    if lacam_bin is None:
+        lacam_bin = os.environ.get(_LACAM_BIN_ENV)
+    if lacam_bin and os.path.exists(lacam_bin):
+        from ..data.lacam_expert import solve_with_lacam
+        sol = solve_with_lacam(inst.grid, inst.starts, inst.goals,
+                               lacam_bin=lacam_bin, time_limit_ms=10000)
+        if sol is not None:
+            return sol.paths
+        # LaCAM failed on this instance -> fall through to PIBT
     pibt = PIBT(inst.grid, inst.goals)
     paths = pibt.solve(inst.starts, max_steps=inst.horizon * 3)
     if paths is None:
-        # mark as unsolved by returning trivial stay-paths
         return [[s] for s in inst.starts]
     return paths
 
 
 def _pibt_only_paths(inst):
-    """Pure PIBT at inference (no network). Same as expert here, but kept
-    separate so that if you later change the expert (e.g. to LaCAM via Route A)
-    this stays as the raw-PIBT reference."""
-    return _expert_paths(inst)
+    """Pure PIBT at inference (no network). This is the BASELINE TO BEAT —
+    distinct from `expert` once a LaCAM binary is set."""
+    pibt = PIBT(inst.grid, inst.goals)
+    paths = pibt.solve(inst.starts, max_steps=inst.horizon * 3)
+    if paths is None:
+        return [[s] for s in inst.starts]
+    return paths
 
 
-def run_method(method: str, model, instances, device="cpu"):
+def run_method(method: str, model, instances, device="cpu", lacam_bin=None):
     """Run one method over a list of instances; return list of metric dicts."""
     results = []
     for inst in instances:
         if method == "expert":
-            paths = _expert_paths(inst)
+            paths = _expert_paths(inst, lacam_bin=lacam_bin)
         elif method == "pibt_only":
             paths = _pibt_only_paths(inst)
         elif method == "greedy":
@@ -67,17 +87,19 @@ def run_method(method: str, model, instances, device="cpu"):
     return results
 
 
-def run_sweep(model, test_sets: dict, methods=None, device="cpu"):
+def run_sweep(model, test_sets: dict, methods=None, device="cpu",
+              lacam_bin=None):
     """Run all methods across all agent counts.
 
-    test_sets: {agent_count: [Instance, ...]}
-    Returns: {method: {agent_count: summary_dict}}
+    lacam_bin: path to compiled LaCAM binary. If given, the `expert` method
+        uses LaCAM (the near-optimal upper reference). If None, expert == PIBT.
     """
     methods = methods or ["expert", "pibt_only", "greedy", "corrected"]
     out = {m: {} for m in methods}
     for k in sorted(test_sets):
         for m in methods:
-            res = run_method(m, model, test_sets[k], device=device)
+            res = run_method(m, model, test_sets[k], device=device,
+                             lacam_bin=lacam_bin)
             out[m][k] = summarize(res)
             s = out[m][k]
             print(f"  [{m:10s}] agents={k:4d}  CSR={s['csr']:.2f}  "

@@ -44,25 +44,38 @@ Eval results (from `02_evaluate.ipynb`, after the eval-harness fix):
 
 ## Step 1 results — corrector variants
 
-*(fill in after running the notebook)*
+**Run date:** [30-05-26]
 
 Verdict from the automated check at the end of the notebook:
+pibt_only CSRs: {16: 0.94, 32: 0.88, 64: 0.66, 96: 0.393, 128: 0.417}
 
-```
-[paste the "Variants ranked by sum of CSR" output here]
-```
+Variants ranked by sum of CSR across all agent counts:
+  corrected                                CSR={16: 0.98, 32: 0.86, 64: 0.58, 96: 0.25, 128: 0.167}  delta_vs_pibt={16: 0.04, 32: -0.02, 64: -0.08, 96: -0.143, 128: -0.25}  beats_pibt_at_1/5_densities
+  variant:v2_softmax_tiebreak              CSR={16: 0.96, 32: 0.76, 64: 0.44, 96: 0.179, 128: 0.083}  delta_vs_pibt={16: 0.02, 32: -0.12, 64: -0.22, 96: -0.214, 128: -0.333}  beats_pibt_at_1/5_densities
+  variant:v4_prio_by_conf                  CSR={16: 0.84, 32: 0.64, 64: 0.24, 96: 0.036, 128: 0.0}  delta_vs_pibt={16: -0.1, 32: -0.24, 64: -0.42, 96: -0.357, 128: -0.417}  beats_pibt_at_0/5_densities
+  variant:v3_conf_gated                    CSR={16: 0.88, 32: 0.5, 64: 0.1, 96: 0.0, 128: 0.0}  delta_vs_pibt={16: -0.06, 32: -0.38, 64: -0.56, 96: -0.393, 128: -0.417}  beats_pibt_at_0/5_densities
 
-**Winning variant:** _(name or "none — proceed to Step 2")_
+**Winning variant:** none. v1 (current `corrected`) remains the best.
+
+**Interpretation:** Corrector formulation is NOT the bottleneck. Gating the
+network out when uncertain (v3) was the worst, indicating that the noisy
+softmax carries useful coordination signal even at low confidence. The network
+has nothing better to give us than what v1 already extracts.
+
+**Decision:** proceed to Step 2 (feature engineering). The network's INPUTS
+lack coordination signal, not the way we use its outputs.
 
 **Plot files:**
 - `results_step1/step1_csr.png`
 - `results_step1/step1_deadlock.png`
 - `results_step1/step1_table.csv`
 
+
+
 **Decision:**
 - [ ] A variant clearly beats pibt_only at 32-64 agents -> **STOP**, write up.
-- [ ] Marginal improvement only -> **proceed to Step 2** (feature engineering).
-- [ ] No improvement -> **proceed to Step 2** (corrector formulation isn't the bottleneck).
+- [x ] Marginal improvement only -> **proceed to Step 2** (feature engineering).
+- [x ] No improvement -> **proceed to Step 2** (corrector formulation isn't the bottleneck).
 
 ## Step 2 results — feature engineering
 

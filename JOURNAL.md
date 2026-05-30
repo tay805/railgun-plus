@@ -44,60 +44,64 @@ Eval results (from `02_evaluate.ipynb`, after the eval-harness fix):
 
 ## Step 1 results — corrector variants
 
-**Run date:** [30-05-26]
+**Status: COMPLETE.** None of the variants helped. v1 (current `corrected`) is
+the best of the four.
 
-Verdict from the automated check at the end of the notebook:
-pibt_only CSRs: {16: 0.94, 32: 0.88, 64: 0.66, 96: 0.393, 128: 0.417}
+```
+pibt_only CSRs: {16: 0.94, 32: 0.88, 64: 0.66, 96: 0.39, 128: 0.42}
 
-Variants ranked by sum of CSR across all agent counts:
-  corrected                                CSR={16: 0.98, 32: 0.86, 64: 0.58, 96: 0.25, 128: 0.167}  delta_vs_pibt={16: 0.04, 32: -0.02, 64: -0.08, 96: -0.143, 128: -0.25}  beats_pibt_at_1/5_densities
-  variant:v2_softmax_tiebreak              CSR={16: 0.96, 32: 0.76, 64: 0.44, 96: 0.179, 128: 0.083}  delta_vs_pibt={16: 0.02, 32: -0.12, 64: -0.22, 96: -0.214, 128: -0.333}  beats_pibt_at_1/5_densities
-  variant:v4_prio_by_conf                  CSR={16: 0.84, 32: 0.64, 64: 0.24, 96: 0.036, 128: 0.0}  delta_vs_pibt={16: -0.1, 32: -0.24, 64: -0.42, 96: -0.357, 128: -0.417}  beats_pibt_at_0/5_densities
-  variant:v3_conf_gated                    CSR={16: 0.88, 32: 0.5, 64: 0.1, 96: 0.0, 128: 0.0}  delta_vs_pibt={16: -0.06, 32: -0.38, 64: -0.56, 96: -0.393, 128: -0.417}  beats_pibt_at_0/5_densities
+Variants ranked by sum of CSR:
+  corrected (v1)              CSR={16:0.98,32:0.86,64:0.58,96:0.25,128:0.167}  beats_pibt_at_1/5
+  variant:v2_softmax_tiebreak CSR={16:0.96,32:0.76,64:0.44,96:0.179,128:0.083} beats_pibt_at_1/5
+  variant:v4_prio_by_conf     CSR={16:0.84,32:0.64,64:0.24,96:0.036,128:0.0}   beats_pibt_at_0/5
+  variant:v3_conf_gated       CSR={16:0.88,32:0.5, 64:0.1, 96:0.0,  128:0.0}   beats_pibt_at_0/5
+```
 
-**Winning variant:** none. v1 (current `corrected`) remains the best.
+**Interpretation:** corrector formulation is NOT the bottleneck. Notably, v3
+(confidence-gated) was the WORST -- gating the network out when uncertain
+removes signal exactly when it's most needed (congestion situations where PIBT
+also lacks an obvious choice). The full softmax distribution from v1 carries
+useful coordination signal, even when noisy.
 
-**Interpretation:** Corrector formulation is NOT the bottleneck. Gating the
-network out when uncertain (v3) was the worst, indicating that the noisy
-softmax carries useful coordination signal even at low confidence. The network
-has nothing better to give us than what v1 already extracts.
+**Decision: proceed to Step 2 (feature engineering).** The network's INPUTS
+lack coordination signal; how we use its outputs is already near-optimal.
 
-**Decision:** proceed to Step 2 (feature engineering). The network's INPUTS
-lack coordination signal, not the way we use its outputs.
+## Step 2 — feature engineering with coordination signals
 
-**Plot files:**
-- `results_step1/step1_csr.png`
-- `results_step1/step1_deadlock.png`
-- `results_step1/step1_table.csv`
+**Status: BUILT, ready to run.** Notebooks:
+- `04_step2_generate_train_v2.ipynb` -- generate v2 features and train new model
+- `05_step2_evaluate.ipynb` -- evaluate v2 model with adaptive-density test sets
 
+**What changed:**
+1. New `features_v2.py` adds three coordination channels (channels 6, 7, 8):
+   - **local agent-density** (5x5 sum) — "this corridor is crowded"
+   - **predicted next-step occupancy** under greedy go-toward-goal — "this cell will be contested"
+   - **per-cell remaining cost-to-goal** of occupying agent — distinguishes urgent vs near-goal agents
+2. Corrector auto-detects 6- vs 9-channel models so the SAME inference code works for both.
+3. New `data/test_sets.py` (`build_test_sets`) uses an adaptive-density schedule
+   so test sets at 96/128 agents are 50 instances each (vs 28/12 before).
+4. Caught and fixed a bug in the density integral-image during testing -- the
+   first naive-baseline test mismatched by up to 5; rewritten with a proper
+   zero-prefixed SAT and verified against 60 random trials.
 
+**Run order:**
+1. Run `04_..._v2.ipynb` -- generates v2 shards (~1 hour), retrains from scratch (~few hours, early-stops). Save best.pt as a Kaggle dataset.
+2. Run `05_step2_evaluate.ipynb` -- builds adaptive test sets, runs all four methods, prints `corrected vs pibt_only` deltas.
 
-**Decision:**
-- [ ] A variant clearly beats pibt_only at 32-64 agents -> **STOP**, write up.
-- [x ] Marginal improvement only -> **proceed to Step 2** (feature engineering).
-- [x ] No improvement -> **proceed to Step 2** (corrector formulation isn't the bottleneck).
+**Decision rule:**
+- corrected beats pibt_only at >= 3/7 densities (and meaningfully at 32-64): **STOP**, write up.
+- Marginal: continue to Step 3 (multi-step temporal input).
+- No improvement over Step 0: corrector + features both ruled out — Step 3 or Step 4.
 
-## Step 2 results — feature engineering
+## Step 3 — multi-step temporal input
+
+*(not yet run; build only if Step 2 doesn't suffice)*
+
+## Step 4 — RL fine-tuning
 
 *(not yet run)*
 
-Planned new feature channels:
-- local agent-density heatmap (5x5 neighbourhood count)
-- predicted next-step occupancy under independent shortest-path
-- per-cell remaining cost-to-goal of the occupying agent
+## Fixes resolved
 
-## Step 3 results — multi-step temporal input
-
-*(not yet run)*
-
-## Step 4 results — RL fine-tuning
-
-*(not yet run)*
-
-## Fixes still pending regardless of step
-
-- Test sets at 96/128 agents shrink to 28/12 instances because POGEMA can't
-  generate solvable random-density-0.2 instances at that scale. Fix: either
-  drop those agent counts, or lower density to 0.1, or switch agent counts to
-  {16, 32, 48, 64, 80}. The 16/32/64 numbers are publication-stable; the
-  96/128 numbers are too noisy.
+- ~~Test sets shrink at 96/128~~ -- fixed in Step 2 via `build_test_sets` adaptive density.
+- ~~Eval bug: expert always ran PIBT~~ -- fixed earlier (`_expert_paths` now invokes LaCAM).

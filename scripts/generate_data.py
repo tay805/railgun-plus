@@ -28,12 +28,14 @@ import numpy as np
 
 from railgun_plus.data.generate import generate_with_pogema
 from railgun_plus.data.features import instance_to_samples, normalize_features
+from railgun_plus.data.features_v2 import (instance_to_samples_v2,
+                                           normalize_features_v2)
 
 
 def config_tag(args) -> str:
     """Stable identifier for this generation config (used in filenames).
-    Includes expert so pibt/lacam data never collide."""
-    return (f"{args.expert}_m{args.map_size}_d{int(args.density*100)}"
+    Includes expert and feature-version so different configs never collide."""
+    return (f"{args.expert}_{args.features}_m{args.map_size}_d{int(args.density*100)}"
             f"_a{args.agents}_s{args.seed}")
 
 
@@ -71,6 +73,10 @@ def main():
                          "--expert lacam)")
     ap.add_argument("--lacam-time-ms", type=int, default=10000,
                     help="LaCAM anytime budget per instance in ms")
+    ap.add_argument("--features", choices=["v1", "v2"], default="v1",
+                    help="v1 = 6-channel RAILGUN features; v2 = 9-channel with "
+                         "Step-2 coordination signals (density, predicted "
+                         "occupancy, per-cell remaining cost)")
     args = ap.parse_args()
 
     if args.expert == "lacam" and not args.lacam_bin:
@@ -132,9 +138,15 @@ def main():
                 obstacle_density=args.density, num_agents=args.agents,
                 seed=chunk_seed)
 
+        # pick v1 or v2 feature conversion
+        if args.features == "v2":
+            sampler, normalizer = instance_to_samples_v2, normalize_features_v2
+        else:
+            sampler, normalizer = instance_to_samples, normalize_features
+
         for inst in insts:
-            for F_in, F_out, mask in instance_to_samples(inst):
-                buf_in.append(normalize_features(F_in))
+            for F_in, F_out, mask in sampler(inst):
+                buf_in.append(normalizer(F_in))
                 buf_out.append(F_out)
                 buf_mask.append(mask)
                 total_samples += 1

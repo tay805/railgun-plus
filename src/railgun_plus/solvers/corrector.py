@@ -32,10 +32,21 @@ from ..data.grid_utils import bfs_distance_field, neighbors
 Cell = tuple[int, int]
 
 
-def _build_input_tensor(grid, cur_pos, goals, dist_fields, device):
+def _model_input_channels(model) -> int:
+    """Inspect the model's first conv layer to find expected input channels.
+    Lets the corrector auto-pick v1 vs v2 features based on the loaded model."""
+    for m in model.modules():
+        if isinstance(m, torch.nn.Conv2d):
+            return m.in_channels
+    return NUM_FEATURE_CHANNELS  # fallback
+
+
+def _build_input_tensor(grid, cur_pos, goals, dist_fields, device,
+                        num_channels: int = NUM_FEATURE_CHANNELS):
     """Construct the (1, k, Hp, Wp) network input for the CURRENT state.
 
-    Mirrors data/features.py but for a live state (no expert label needed).
+    num_channels: pass 6 for v1 features, 9 for v2. Auto-detected from the
+    model via _model_input_channels() in _policy_probs.
     """
     from ..data.features import cost_gradient
     padded, valid, (H, W) = pad_to_multiple(grid, 16)
@@ -56,21 +67,35 @@ def _build_input_tensor(grid, cur_pos, goals, dist_fields, device):
         gdx[r][c] = grads[i][0][r][c]
         gdy[r][c] = grads[i][1][r][c]
 
-    F = np.zeros((NUM_FEATURE_CHANNELS, Hp, Wp), dtype=np.float32)
+    F = np.zeros((num_channels, Hp, Wp), dtype=np.float32)
     F[0] = padded
     F[1, :H, :W] = cur
     F[2, :H, :W] = goal_chan
     F[3, :H, :W] = ctg
     F[4, :H, :W] = gdx
     F[5, :H, :W] = gdy
-    F = normalize_features(F)
+
+    if num_channels >= 9:
+        # v2 coordination channels
+        from ..data.features_v2 import (local_density, predicted_next_occupancy,
+                                        remaining_cost_per_cell,
+                                        normalize_features_v2)
+        F[6, :H, :W] = local_density(cur, k=5)
+        F[7, :H, :W] = predicted_next_occupancy(grid, cur_pos, dist_fields)
+        F[8, :H, :W] = remaining_cost_per_cell(cur_pos, dist_fields, (H, W))
+        F = normalize_features_v2(F)
+    else:
+        F = normalize_features(F)
+
     return torch.from_numpy(F).unsqueeze(0).to(device), (H, W)
 
 
 @torch.no_grad()
 def _policy_probs(model, grid, cur_pos, goals, dist_fields, device):
     """Run the model; return per-agent action-probability vectors (len 5)."""
-    x, (H, W) = _build_input_tensor(grid, cur_pos, goals, dist_fields, device)
+    num_ch = _model_input_channels(model)
+    x, (H, W) = _build_input_tensor(grid, cur_pos, goals, dist_fields, device,
+                                    num_channels=num_ch)
     logits = model(x)[0]                       # (5, Hp, Wp)
     probs = torch.softmax(logits, dim=0).cpu().numpy()
     per_agent = []

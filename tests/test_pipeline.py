@@ -100,3 +100,40 @@ def test_harness_expert_runs_without_model():
     s = summarize(res)
     assert s["n"] == len(insts)
     assert 0.0 <= s["csr"] <= 1.0
+
+
+def test_local_density_matches_naive():
+    """Catch any future regression in the v2 local_density integral-image impl."""
+    from railgun_plus.data.features_v2 import local_density
+    rng = np.random.default_rng(42)
+    for _ in range(5):
+        H = int(rng.integers(8, 20))
+        W = int(rng.integers(8, 20))
+        cur = (rng.random((H, W)) > 0.6).astype(np.float32) * \
+              np.arange(1, H*W+1).reshape(H, W)
+        r = 2  # k=5
+        binc = (cur > 0).astype(np.float32)
+        slow = np.zeros_like(binc)
+        for i in range(H):
+            for j in range(W):
+                i0, i1 = max(0, i-r), min(H, i+r+1)
+                j0, j1 = max(0, j-r), min(W, j+r+1)
+                slow[i][j] = binc[i0:i1, j0:j1].sum()
+        fast = local_density(cur, k=5)
+        assert np.allclose(fast, slow), f"density mismatch: max diff {np.abs(fast-slow).max()}"
+
+
+def test_features_v2_shapes():
+    """v2 features must produce 9-channel inputs with correct shape."""
+    from railgun_plus.data.features_v2 import (instance_to_samples_v2,
+                                               NUM_FEATURE_CHANNELS_V2)
+    grid = np.zeros((6, 8), dtype=np.int8)
+    inst = solve_instance(grid, [(0, 0), (5, 7)], [(5, 7), (0, 0)],
+                          max_steps=128, seed=0)
+    assert inst is not None
+    samples = list(instance_to_samples_v2(inst))
+    assert len(samples) > 0
+    F_in, F_out, mask = samples[0]
+    assert F_in.shape[0] == NUM_FEATURE_CHANNELS_V2 == 9
+    assert F_in.shape[1] % 16 == 0 and F_in.shape[2] % 16 == 0
+    assert F_out.shape == mask.shape == F_in.shape[1:]
